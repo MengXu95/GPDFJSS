@@ -1,0 +1,41 @@
+# ── Model directories ───────────────────────────────────────
+routing_models/
+sequencing_models/
+
+# ── Data files ──────────────────────────────────────────────
+*.npy
+*.pkl
+*.csv
+*.pt
+*.mat
+*.h5
+*.hdf5
+*.zip
+*.xlsx
+*.xls
+
+# ── Log / result files ───────────────────────────────────────
+*_each_gen.txt
+*_running_time*.txt
+*_min_fitness*.txt
+
+# ── Images & documents ──────────────────────────────────────
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.svg
+*.eps
+*.pdf
+
+# ── Python artifacts ─────────────────────────────────────────
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+
+# ── macOS ────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
