@@ -1,0 +1,5 @@
+numpy>=1.26,<3
+deap>=1.4,<2
+torch>=2.6,<3
+pandas>=2.2,<4
+graphviz>=0.20,<1

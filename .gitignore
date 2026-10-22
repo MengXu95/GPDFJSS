@@ -39,3 +39,10 @@ __pycache__/
 .DS_Store
 .AppleDouble
 .LSOverride
+
+# TransGP runtime artifacts
+.venv/
+TransGP/archive_gp/train/
+TransGP/MultitaskTransformerGuidedMutationGP/train/
+TransGP/training_logs/
+TransGP/Transformer/*_transformer_multitask/

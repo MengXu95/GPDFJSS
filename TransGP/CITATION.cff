@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+message: "If you use TransGP, please cite the paper below."
+type: software
+title: TransGP
+authors:
+  - family-names: Xu
+    given-names: Meng
+  - family-names: Liu
+    given-names: Jiao
+  - family-names: Yu
+    given-names: Hua
+  - family-names: Ong
+    given-names: Yew Soon
+repository-code: "https://github.com/MengXu95/TransGP"
+preferred-citation:
+  type: article
+  title: "TransGP: Task-Conditioned Transformer-Guided Genetic Programming for Multitask Dynamic Flexible Job Shop Scheduling"
+  authors:
+    - family-names: Xu
+      given-names: Meng
+    - family-names: Liu
+      given-names: Jiao
+    - family-names: Yu
+      given-names: Hua
+    - family-names: Ong
+      given-names: Yew Soon
+  journal: IEEE Transactions on Evolutionary Computation
+  year: 2026
+  doi: 10.1109/TEVC.2026.3734959
+  url: "https://ieeexplore.ieee.org/document/11698820"
+  notes: Early Access
