@@ -6,8 +6,9 @@ Use separate output directories for different experiments to avoid overwriting
 models or results.
 
 This is the single-objective TransGP integration inside GPDFJSS. Run commands
-from the **GPDFJSS repository root** using `python -m TransGP.<entry>`.
-The entry points put runtime artifacts under `TransGP`; paths shown in output
+from the **GPDFJSS repository root** using `python main.py --config ...` or
+`python main_model_train.py --config ...`.
+The unified entry points put TransGP runtime artifacts under `TransGP`; paths shown in output
 layouts below are relative to that directory unless stated otherwise.
 
 The code comes from the source `main` commit
@@ -32,7 +33,7 @@ evolution, the models generate mutation subtrees conditioned on
 
 | Component | Implementation | Purpose |
 | --- | --- | --- |
-| Archive generation | [archive_gp](../archive_gp) | Single-task multitree GP; `MTGP` is the CLI name for this archive generator |
+| Archive generation | [archive_gp](../archive_gp) | Single-task multitree GP; select `TransGP-archive` in the unified CLI |
 | Tree generators | [Transformer_tree_multitask.py](../Transformer/Transformer_tree_multitask.py) | Tree tokenization, task-conditioned Transformer training and checkpoints |
 | TransGP setup | [GPFC.py](../MultitaskTransformerGuidedMutationGP/GPFC.py) | Task-tagged population, simulator fitness and parameters |
 | Guided mutation | [multi_tree.py](../MultitaskTransformerGuidedMutationGP/multi_tree.py) | Sequencing/routing subtree generation using task conditions |
@@ -42,6 +43,10 @@ evolution, the models generate mutation subtrees conditioned on
 
 The paper reference is in the [project README](../../README.md#transgp-citation)
 and [CITATION.cff](../CITATION.cff).
+Configuration fields and all runnable examples are listed in the
+[unified configuration reference](../../README.md#unified-configuration).
+`MTGP` now unambiguously selects the original basic GP at the root entry point;
+use `TransGP-archive` to generate the pretraining data described here.
 
 ## 2. Installation
 
@@ -123,7 +128,7 @@ The following example generates all nine archives required for `Fmax`:
 ```powershell
 foreach ($util in @("0.75", "0.85", "0.95")) {
     foreach ($seed in 0..2) {
-        & $python -m TransGP.main "Fmax-$util-1.5" Fmax $seed MTGP
+        & $python main.py --config .\configs\transgp_archive.json --dataset-name "Fmax-$util-1.5" --seed $seed
         if ($LASTEXITCODE -ne 0) { throw "GP archive generation failed" }
     }
 }
@@ -141,8 +146,9 @@ The model trainer reads these archive seeds for **each** utilization level:
 | `Fmean` | 3, 4, 5 |
 | `Tmean` | 6, 7, 8 |
 
-For example, to generate the `Fmean` dataset, replace `Fmax` with `Fmean` and
-`0..2` with `3..5` in the loop above.
+For example, to generate the `Fmean` dataset, replace `Fmax` with `Fmean`,
+`0..2` with `3..5`, and add `--objective Fmean` in the loop above so it
+overrides the example configuration's objective too.
 
 Archive files use the following layout:
 
@@ -158,13 +164,13 @@ archive under a combined multitask scenario.
 time-limited run can produce an empty archive and cannot replace a complete
 pretraining dataset. Each GP run defaults to 50 generations.
 
-Do not use the root-level basic GP entry to generate these archives: it retains
+Do not select `MTGP` to generate these archives: it retains
 its original 50-individual, five-generation defaults and ten-machine setting.
 The TransGP archive CLI also accepts an optional machine count and a
 generation-boundary time budget, for example:
 
 ```powershell
-& $python -m TransGP.main Fmax-0.75-1.5 Fmax 0 MTGP 6 --wall-clock-seconds 60
+& $python main.py --config .\configs\transgp_archive.json --machine-num 6 --wall-clock-seconds 60
 ```
 
 The budget is checked between generations, not during a simulation. This
@@ -175,9 +181,9 @@ shortened run is not a substitute for a full pretraining archive.
 After the required archives exist, train the sequencing and routing models:
 
 ```powershell
-& $python -m TransGP.main_model_train Fmax-0.75-0.85-0.95-1.5 sequencing Transformer 50
+& $python main_model_train.py --config .\configs\transformer_sequencing.json
 if ($LASTEXITCODE -ne 0) { throw "Sequencing model training failed" }
-& $python -m TransGP.main_model_train Fmax-0.75-0.85-0.95-1.5 routing Transformer 50
+& $python main_model_train.py --config .\configs\transformer_routing.json
 if ($LASTEXITCODE -ne 0) { throw "Routing model training failed" }
 ```
 
@@ -199,14 +205,14 @@ pretrained weights are not bundled with the repository.
 ## 6. Run TransGP
 
 ```powershell
-& $python -m TransGP.main Fmax-0.75-0.85-0.95-1.5 Fmax 0 TransGP
+& $python main.py --config .\configs\transgp_train.json
 ```
 
 To run multiple independent GP seeds:
 
 ```powershell
 foreach ($seed in 0..29) {
-    & $python -m TransGP.main Fmax-0.75-0.85-0.95-1.5 Fmax $seed TransGP
+    & $python main.py --config .\configs\transgp_train.json --seed $seed
     if ($LASTEXITCODE -ne 0) { throw "TransGP failed at seed $seed" }
 }
 ```
@@ -218,7 +224,7 @@ Full training runs can take substantially longer than the automated tests.
 ## 7. Evaluate saved rules
 
 ```powershell
-& $python -m TransGP.main_GP_TransGP_test TransGP Fmax-0.75-0.85-0.95-1.5 Fmax 0
+& $python main.py --config .\configs\transgp_test.json
 ```
 
 For each task, the evaluator first looks for the final-generation top-individual
@@ -238,17 +244,17 @@ MultitaskTransformerGuidedMutationGP\train\scenario_Fmax-0.75-0.85-0.95-1.5\
 
 These are final-rule evaluation results, not per-generation test curves.
 
-The alternate command below runs the same TransGP evaluator:
+Use `--skip-existing` to reuse finite, correctly shaped existing test results:
 
 ```powershell
-& $python -m TransGP.main Fmax-0.75-0.85-0.95-1.5 Fmax 0 TransGP-test
+& $python main.py --config .\configs\transgp_test.json --skip-existing
 ```
 
-To evaluate one saved archive-GP rule instead, use method `GP` and a single-task
+To evaluate one saved archive-GP rule instead, use `TransGP-archive-test` and a single-task
 scenario. This reads the isolated archive-GP outputs, not the root baseline:
 
 ```powershell
-& $python -m TransGP.main_GP_TransGP_test GP Fmax-0.75-1.5 Fmax 0
+& $python main.py --config .\configs\transgp_archive_test.json
 ```
 
 ## 8. Outputs and configuration
@@ -276,7 +282,9 @@ three copies as if they were separate runs.
 | `MTGP_POP_SIZE`, `MTGP_TOURSIZE` | Ordinary GP population and tournament size; these do not change the TransGP population |
 
 Relative custom paths are resolved from `TransGP`, because the CLI changes its
-working directory there. Prefer absolute custom output paths.
+working directory there for execution, restoring the caller's directory on
+completion or failure. The JSON config path itself is resolved from the
+caller's directory before that change. Prefer absolute custom output paths.
 `MTGP_TRAIN_ROOT` optionally relocates archive-GP outputs only; the model trainer
 still expects archives under `TransGP\archive_gp\train`, so leave it unset for
 the standard workflow.

@@ -1,9 +1,9 @@
 """Evaluate saved GP or TransGP rules on independent simulator instances."""
 
 import argparse
-import os
 
-from TransGP.experiment_config import OBJECTIVES, PROJECT_ROOT, parse_scenario, require_transgp_tasks
+from main import main as run_main
+from TransGP.experiment_config import OBJECTIVES
 
 
 def parse_bool(value: str) -> bool:
@@ -22,22 +22,14 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("seed", type=int)
     parser.add_argument("skip_existing", type=parse_bool, nargs="?", default=False)
     args = parser.parse_args(argv)
-    try:
-        scenario = parse_scenario(args.dataset_name, args.objective)
-        if args.seed < 0:
-            raise ValueError("Seed must be nonnegative")
-        if args.method == "TransGP":
-            require_transgp_tasks(scenario)
-    except ValueError as error:
-        parser.error(str(error))
-
-    os.chdir(PROJECT_ROOT)
-    from TransGP.GP_TransGP_test import test
-
-    test(
-        args.method, args.dataset_name, args.objective, args.seed,
-        list(scenario.utilizations), skip_existing=args.skip_existing,
-    )
+    algorithm = "TransGP-test" if args.method == "TransGP" else "TransGP-archive-test"
+    options = [
+        "--algorithm", algorithm, "--dataset-name", args.dataset_name,
+        "--objective", args.objective, "--seed", str(args.seed),
+    ]
+    if args.skip_existing:
+        options.append("--skip-existing")
+    run_main(options)
 
 
 if __name__ == "__main__":

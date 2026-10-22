@@ -18,11 +18,14 @@ No Java runtime is required.
 
 | Path | Purpose |
 | --- | --- |
-| [main.py](main.py) | Original basic GP training and testing CLI |
+| [main.py](main.py) | Unified JSON-configured GP/TransGP training and evaluation CLI |
+| [main_model_train.py](main_model_train.py) | Unified Transformer model-pretraining CLI |
+| [configs](configs) | Ready-to-run configurations for each workflow stage |
+| [experiment_config.py](experiment_config.py) | Shared configuration loading and validation |
 | [MTGPforNewSimulatorBasedOnJava](MTGPforNewSimulatorBasedOnJava) | Original GP implementation and shared primitives, operators and archive loader |
 | [newSimulatorBasedOnJava](newSimulatorBasedOnJava) | Shared DFJSS simulator |
 | [Test](Test) | Original basic GP evaluation |
-| [TransGP](TransGP) | Single-objective TransGP CLI, archive generator, Transformers, evolution and tests |
+| [TransGP](TransGP) | Single-objective TransGP archive generator, Transformers, evolution and tests |
 | [TransGP/archive_gp](TransGP/archive_gp) | GP variant used to generate TransGP pretraining archives |
 | [TransGP/Transformer](TransGP/Transformer) | Task-conditioned tree generators; checkpoints are generated here |
 | [TransGP/MultitaskTransformerGuidedMutationGP](TransGP/MultitaskTransformerGuidedMutationGP) | TransGP population, guided mutation and saved rules |
@@ -37,8 +40,10 @@ weights or virtual environments.
 
 The simulator and compatible GP helpers are reused rather than copied.
 TransGP-specific imports are namespaced under `TransGP`, and default outputs
-stay inside that directory. The original basic GP entry point, algorithm
-parameters and output locations are unchanged.
+stay inside that directory. The original basic GP algorithm parameters and
+output locations are unchanged. Root-level entry points now handle both
+approaches; the old TransGP entry modules are compatibility adapters, not
+separate implementations.
 
 ## Installation
 
@@ -56,22 +61,87 @@ and inference currently run on **CPU**. Graphviz's optional `dot` executable
 enables tree images; optional `openpyxl` enables Excel logs. See the
 [usage guide](TransGP/docs/TRANSGP_USAGE.md#2-installation) for details.
 
-## Basic GP for DFJSS
+## Unified configuration
 
-The original CLI takes five positional arguments:
+Choose a JSON configuration to trigger the required algorithm or stage:
 
-```text
-python main.py DATASET OBJECTIVE UTILIZATION SEED ALGO
+| Configuration | Entry point | `algorithm` / stage |
+| --- | --- | --- |
+| [gp_train.json](configs/gp_train.json) | `main.py` | `MTGP`: original basic GP training |
+| [gp_test.json](configs/gp_test.json) | `main.py` | `MTGP-test`: original basic GP evaluation |
+| [transgp_archive.json](configs/transgp_archive.json) | `main.py` | `TransGP-archive`: generate a single-task pretraining archive |
+| [transgp_archive_test.json](configs/transgp_archive_test.json) | `main.py` | `TransGP-archive-test`: evaluate an archive-GP rule |
+| [transgp_train.json](configs/transgp_train.json) | `main.py` | `TransGP`: guided multitask evolution |
+| [transgp_test.json](configs/transgp_test.json) | `main.py` | `TransGP-test`: independent evaluation |
+| [transformer_sequencing.json](configs/transformer_sequencing.json) | `main_model_train.py` | `TransGP` / sequencing model pretraining |
+| [transformer_routing.json](configs/transformer_routing.json) | `main_model_train.py` | `TransGP` / routing model pretraining |
+
+For example, the TransGP evolution configuration is:
+
+```json
+{
+  "algorithm": "TransGP",
+  "dataset_name": "Fmax-0.75-0.85-0.95-1.5",
+  "objective": "Fmax",
+  "seed": 0
+}
 ```
+
+Run it after generating the required archives and both checkpoints:
 
 ```powershell
-& $python main.py Fmax-0.85-1.5 max-flowtime 0.85 0 MTGP
-& $python main.py Fmax-0.85-1.5 max-flowtime 0.85 0 MTGP-test
+& $python main.py --config .\configs\transgp_train.json
 ```
 
-Here `0.85` is utilization; the trailing `1.5` in the dataset name is the
-due-date factor, **not** the utilization argument. The basic GP uses ten
-machines and currently defaults to population 50 and 5 generations. Training
+Named CLI options override the JSON values without modifying the file:
+
+```powershell
+& $python main.py --config .\configs\transgp_train.json --seed 7
+& $python main_model_train.py --config .\configs\transformer_routing.json --epochs 20
+& $python main.py --help
+& $python main_model_train.py --help
+```
+
+### Configuration fields
+
+For experiments, `algorithm`, `dataset_name` and `objective` are required.
+`seed` defaults to 0 and must be a nonnegative integer. `objective` accepts the
+short identifiers (`Fmax`, `Fmean`, etc.) or simulator names such as
+`max-flowtime`; it must agree with the scenario name.
+
+| Optional experiment field | Supported use |
+| --- | --- |
+| `utilization` | Single-task runs only; if provided, must match `dataset_name`. Otherwise inferred from it |
+| `machine_num` | `TransGP-archive` only; integer >= 2, otherwise inferred as 6/8/10 from utilization |
+| `wall_clock_seconds` | `TransGP-archive` only; finite positive generation-boundary budget |
+| `skip_existing` | Boolean for `TransGP-test` or `TransGP-archive-test`; defaults to false |
+
+Model configurations use `dataset_name`, `rule_type` (`sequencing` or `routing`),
+`algorithm` (`TransGP`), `model_type` (`Transformer`) and `epochs` (positive
+integer, default 50). Model pretraining does not apply to basic GP. CVAE/LSTM
+are not included; the former root trainer's imports of those missing modules
+have been removed.
+
+Use the matching entry point for each configuration. Unknown fields, invalid
+types, duplicate keys and incompatible task settings fail explicitly rather
+than being ignored. Config files are read relative to the caller's working
+directory **before** execution changes directory. Basic GP still writes under
+the repository root; all TransGP stages still write under `TransGP`.
+The caller's working directory is restored after execution, including failures.
+These configurations select workflows and entry-point arguments; algorithm
+population/generation defaults remain in their implementation modules.
+
+## Basic GP for DFJSS
+
+```powershell
+& $python main.py --config .\configs\gp_train.json
+if ($LASTEXITCODE -ne 0) { throw "Basic GP training failed" }
+& $python main.py --config .\configs\gp_test.json
+```
+
+The basic GP uses ten machines and currently defaults to population 50 and
+5 generations. In `Fmax-0.85-1.5`, `0.85` is utilization and the trailing
+`1.5` is the due-date factor. Training
 outputs are saved under
 `MTGPforNewSimulatorBasedOnJava\train\scenario_<dataset>`.
 
@@ -86,14 +156,9 @@ Single-task GP archives
     -> independent evaluation of saved rules
 ```
 
-Use module entry points to avoid collisions with the original root-level
-scripts:
-
-```powershell
-& $python -m TransGP.main --help
-& $python -m TransGP.main_model_train --help
-& $python -m TransGP.main_GP_TransGP_test --help
-```
+Use the same two root-level entry points, selecting the TransGP configurations
+below. Unlike `MTGP`, `TransGP-archive` uses the archive-generation settings
+needed for pretraining.
 
 ### 1. Generate the GP archives
 
@@ -103,7 +168,7 @@ TransGP uses the ordered task pairs `(utilization, machines)` of `(0.75, 6)`,
 ```powershell
 foreach ($util in @("0.75", "0.85", "0.95")) {
     foreach ($seed in 0..2) {
-        & $python -m TransGP.main "Fmax-$util-1.5" Fmax $seed MTGP
+        & $python main.py --config .\configs\transgp_archive.json --dataset-name "Fmax-$util-1.5" --seed $seed
         if ($LASTEXITCODE -ne 0) { throw "GP archive generation failed" }
     }
 }
@@ -118,9 +183,9 @@ cannot replace them. Archives are saved under
 ### 2. Train both tree generators
 
 ```powershell
-& $python -m TransGP.main_model_train Fmax-0.75-0.85-0.95-1.5 sequencing Transformer 50
+& $python main_model_train.py --config .\configs\transformer_sequencing.json
 if ($LASTEXITCODE -ne 0) { throw "Sequencing model training failed" }
-& $python -m TransGP.main_model_train Fmax-0.75-0.85-0.95-1.5 routing Transformer 50
+& $python main_model_train.py --config .\configs\transformer_routing.json
 if ($LASTEXITCODE -ne 0) { throw "Routing model training failed" }
 ```
 
@@ -137,9 +202,9 @@ Archives and pretrained weights are **not bundled** and must be generated first.
 ### 3. Evolve and evaluate TransGP rules
 
 ```powershell
-& $python -m TransGP.main Fmax-0.75-0.85-0.95-1.5 Fmax 0 TransGP
+& $python main.py --config .\configs\transgp_train.json
 if ($LASTEXITCODE -ne 0) { throw "TransGP evolution failed" }
-& $python -m TransGP.main_GP_TransGP_test TransGP Fmax-0.75-0.85-0.95-1.5 Fmax 0
+& $python main.py --config .\configs\transgp_test.json
 ```
 
 TransGP defaults to a total population of 600 and 50 generations. Training
@@ -157,6 +222,29 @@ saved-file formats, optional archive-GP budgets and custom output paths.
 Running the same scenario and seed again can overwrite its outputs. Only load
 pickle archives and model checkpoints from trusted sources.
 
+## Legacy command compatibility
+
+Existing positional commands remain supported. Their implementations now
+delegate to the unified root entry points:
+
+```powershell
+# Original basic GP: DATASET OBJECTIVE UTILIZATION SEED ALGO.
+& $python main.py Fmax-0.85-1.5 max-flowtime 0.85 0 MTGP
+
+# Former TransGP archive command: MTGP here maps to TransGP-archive.
+& $python -m TransGP.main Fmax-0.75-1.5 Fmax 0 MTGP
+
+# Both old model-training commands reach the same root implementation.
+& $python main_model_train.py Fmax-0.75-0.85-0.95-1.5 routing Transformer 50
+& $python -m TransGP.main_model_train Fmax-0.75-0.85-0.95-1.5 routing Transformer 50
+
+# Former evaluation command also delegates to main.py.
+& $python -m TransGP.main_GP_TransGP_test TransGP Fmax-0.75-0.85-0.95-1.5 Fmax 0
+```
+
+Do not mix positional syntax with `--config` or the new named options.
+Use the JSON configurations for new experiments.
+
 ## Tests
 
 ```powershell
@@ -166,6 +254,8 @@ pickle archives and model checkpoints from trusted sources.
 Tests use temporary fixtures and reduced-scale experiments, covering archive
 generation, both model trainers, guided mutation/evolution, independent
 evaluation, shared imports and preservation of the original GP configuration.
+They also cover JSON validation, all example configurations, CLI overrides,
+legacy commands and working-directory restoration.
 No pre-existing archives or checkpoints are required.
 
 ## TransGP citation

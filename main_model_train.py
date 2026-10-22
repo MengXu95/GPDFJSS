@@ -1,34 +1,65 @@
-import conditionalVAE.conditional_VAE_tree_multitask as CVAETrain
-import LSTMDecoder.LSTM_Decoder_tree_multitask as LSTMTrain
-import Transformer.Transformer_tree_multitask as TransformerTrain
-import sys
+"""Train TransGP tree generators through the shared root-level entry point."""
 
-import os
-import os.path
+import argparse
+from contextlib import chdir
+from pathlib import Path
 
-sys.path
+from experiment_config import TRANSGP_ROOT, ModelTrainingConfig, load_configuration
+from TransGP.experiment_config import parse_scenario
 
-def set_project_root():
-    """Sets the project root directory as the current working directory."""
-    current_file = os.path.abspath(__file__) # get the absolute path of the current file
-    project_root = os.path.dirname(current_file)
-    os.chdir(project_root)
-    # project_root = os.path.dirname(os.path.dirname(current_file)) # go up two levels to get the project root
-    # os.chdir(project_root)
 
-if __name__ == '__main__':
-    dataset_name = str(sys.argv[1]) # e.g., "Fmax-0.75-0.85-0.95-1.5"
-    rule_type = str(sys.argv[2]) # e.g., "routing"
-    model_type = str(sys.argv[3]) #e.g., CVAE or Transformer or LSTM
+def run_training(config: ModelTrainingConfig, parser: argparse.ArgumentParser) -> None:
+    from TransGP.Transformer.Transformer_tree_multitask import main_train, objective_archive_seed_map
 
-    # Example usage:
-    set_project_root()
-    print("Current working directory:", os.getcwd())  # add this line
-    print(f'Train {model_type} of {rule_type} on scenario {dataset_name}:')
+    scenario = parse_scenario(config.dataset_name)
+    with chdir(TRANSGP_ROOT):
+        missing = []
+        for utilization in scenario.utilizations:
+            task_name = f"{scenario.objective}-{utilization}-1.5"
+            for seed in objective_archive_seed_map()[scenario.objective]:
+                path = (
+                    Path("archive_gp") / "train" / f"scenario_{task_name}"
+                    / f"{seed}_meng_archive_{task_name}.pkl"
+                )
+                if not path.is_file():
+                    missing.append(str(path))
+        if missing:
+            parser.error("Generate the single-task GP archives first. Missing archives:\n" + "\n".join(missing))
+        main_train(config.dataset_name, config.rule_type, save_original=True, epochs=config.epochs)
 
-    if model_type == 'Transformer':
-        TransformerTrain.main_train(dataset_name, rule_type)
-    elif model_type == 'CVAE':
-        CVAETrain.main_train(dataset_name, rule_type)
-    elif model_type == 'LSTM':
-        LSTMTrain.main_train(dataset_name, rule_type)
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", help="JSON model-training configuration; named options override its values")
+    parser.add_argument("--algorithm", choices=("TransGP",))
+    parser.add_argument("--dataset-name")
+    parser.add_argument("--rule-type", choices=("sequencing", "routing"))
+    parser.add_argument("--model-type", choices=("Transformer",))
+    parser.add_argument("--epochs", type=int)
+    parser.add_argument("legacy_args", nargs="*", help="Legacy: DATASET RULE_TYPE Transformer [EPOCHS]")
+    args = parser.parse_args(argv)
+    overrides = {
+        name: value for name, value in vars(args).items()
+        if name not in ("config", "legacy_args") and value is not None
+    }
+    data: dict[str, object]
+    try:
+        if args.legacy_args:
+            if args.config or overrides or len(args.legacy_args) not in (3, 4):
+                raise ValueError("Use either --config/named options or DATASET RULE_TYPE Transformer [EPOCHS]")
+            dataset, rule_type, model_type, *epochs = args.legacy_args
+            data = {
+                "dataset_name": dataset, "rule_type": rule_type, "model_type": model_type,
+                "epochs": int(epochs[0]) if epochs else 50,
+            }
+        else:
+            data = load_configuration(args.config) if args.config else {}
+            data.update(overrides)
+        config = ModelTrainingConfig.from_mapping(data)
+    except (ValueError, OSError) as error:
+        parser.error(str(error))
+    run_training(config, parser)
+
+
+if __name__ == "__main__":
+    main()

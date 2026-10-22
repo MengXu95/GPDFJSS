@@ -1,6 +1,7 @@
 import argparse
 import contextlib
 import io
+import json
 import os
 from pathlib import Path
 import pickle
@@ -11,6 +12,8 @@ import unittest
 from unittest.mock import Mock, patch
 
 from TransGP import experiment_config, main, main_GP_TransGP_test, main_model_train
+import main as experiment_main
+import main_model_train as model_entry
 
 
 SCENARIO = "Fmax-0.75-0.85-0.95-1.5"
@@ -89,16 +92,17 @@ class EntryPointTests(unittest.TestCase):
 
     def test_missing_checkpoints_fail_before_evolution(self):
         with tempfile.TemporaryDirectory() as directory, patch(
-            "TransGP.main.checkpoint_paths", return_value=(Path(directory) / "seq.pt", Path(directory) / "route.pt")
+            "main.checkpoint_paths", return_value=(Path(directory) / "seq.pt", Path(directory) / "route.pt")
         ):
             self.assert_cli_error(main.main, [SCENARIO, "Fmax", "0", "TransGP"])
 
     def test_gp_dispatch_preserves_parameters(self):
         runner = Mock()
         module = SimpleNamespace(main=runner)
-        with patch.dict(sys.modules, {"TransGP.archive_gp.GPFC": module}), patch("TransGP.main.os.chdir") as change_directory:
+        original_directory = Path.cwd()
+        with patch.dict(sys.modules, {"TransGP.archive_gp.GPFC": module}):
             main.main(["Fmax-0.75-1.5", "Fmax", "2", "MTGP", "6", "--wall-clock-seconds", "5"])
-        change_directory.assert_called_once_with(experiment_config.PROJECT_ROOT)
+        self.assertEqual(Path.cwd(), original_directory)
         runner.assert_called_once_with(
             "Fmax-0.75-1.5", 2, "max-flowtime", 0.75, 6, wall_clock_limit_seconds=5.0,
         )
@@ -106,22 +110,20 @@ class EntryPointTests(unittest.TestCase):
     def test_transgp_dispatch_preserves_task_order(self):
         runner = Mock()
         with patch.dict(sys.modules, {"TransGP.MultitaskTransformerGuidedMutationGP.GPFC": SimpleNamespace(main=runner)}), patch(
-            "TransGP.main.checkpoint_paths", return_value=()
-        ), patch("TransGP.main.os.chdir"):
+            "main.checkpoint_paths", return_value=()
+        ):
             main.main([SCENARIO, "Fmax", "3", "TransGP"])
         runner.assert_called_once_with(SCENARIO, 3, "max-flowtime", [0.75, 0.85, 0.95])
 
     def test_transgp_test_dispatch_uses_single_objective_evaluator(self):
         evaluator = Mock()
-        with patch.dict(sys.modules, {"TransGP.GP_TransGP_test": SimpleNamespace(test=evaluator)}), patch("TransGP.main.os.chdir"):
+        with patch.dict(sys.modules, {"TransGP.GP_TransGP_test": SimpleNamespace(test=evaluator)}):
             main.main([SCENARIO, "Fmax", "0", "TransGP-test"])
-        evaluator.assert_called_once_with("TransGP", SCENARIO, "Fmax", 0, [0.75, 0.85, 0.95])
+        evaluator.assert_called_once_with("TransGP", SCENARIO, "Fmax", 0, [0.75, 0.85, 0.95], skip_existing=False)
 
     def test_test_entry_has_no_drl_dependency(self):
         evaluator = Mock()
-        with patch.dict(sys.modules, {"TransGP.GP_TransGP_test": SimpleNamespace(test=evaluator), "main_DRL": None}), patch(
-            "TransGP.main_GP_TransGP_test.os.chdir"
-        ):
+        with patch.dict(sys.modules, {"TransGP.GP_TransGP_test": SimpleNamespace(test=evaluator), "main_DRL": None}):
             main_GP_TransGP_test.main(["TransGP", SCENARIO, "Fmax", "0", "true"])
         evaluator.assert_called_once_with(
             "TransGP", SCENARIO, "Fmax", 0, [0.75, 0.85, 0.95], skip_existing=True,
@@ -144,7 +146,7 @@ class EntryPointTests(unittest.TestCase):
         module = SimpleNamespace(main_train=trainer, objective_archive_seed_map=lambda: {"Fmax": [0, 1, 2]})
         with tempfile.TemporaryDirectory() as directory, patch.dict(
             sys.modules, {"TransGP.Transformer.Transformer_tree_multitask": module}
-        ), patch("TransGP.main_model_train.PROJECT_ROOT", Path(directory)), contextlib.chdir(directory):
+        ), patch("main_model_train.TRANSGP_ROOT", Path(directory)), contextlib.chdir(directory):
             self.assert_cli_error(main_model_train.main, [SCENARIO, "sequencing", "Transformer", "1"])
         trainer.assert_not_called()
 
@@ -152,8 +154,8 @@ class EntryPointTests(unittest.TestCase):
         trainer = Mock()
         module = SimpleNamespace(main_train=trainer, objective_archive_seed_map=lambda: {"Fmax": [0, 1, 2]})
         with patch.dict(sys.modules, {"TransGP.Transformer.Transformer_tree_multitask": module}), patch(
-            "TransGP.main_model_train.Path.is_file", return_value=True
-        ), patch("TransGP.main_model_train.os.chdir"):
+            "main_model_train.Path.is_file", return_value=True
+        ):
             main_model_train.main([SCENARIO, "sequencing", "Transformer", "2"])
         trainer.assert_called_once_with(SCENARIO, "sequencing", save_original=True, epochs=2)
 
@@ -229,7 +231,12 @@ class SimulatorAndPersistenceTests(unittest.TestCase):
         ), patch.dict(creator.__dict__), patch.object(GPFC, "POP_SIZE", 32), patch.object(
             GPFC, "NGEN", 31
         ), contextlib.redirect_stdout(io.StringIO()):
-            GPFC.main("Fmax-0.75-1.5", 123, "max-flowtime", 0.75)
+            config_path = Path(directory) / "archive.json"
+            config_path.write_text(json.dumps({
+                "algorithm": "TransGP-archive", "dataset_name": "Fmax-0.75-1.5",
+                "objective": "Fmax", "seed": 123,
+            }), encoding="utf-8")
+            experiment_main.main(["--config", str(config_path)])
             root = Path(directory) / "scenario_Fmax-0.75-1.5"
             values = np.load(root / "123_min_fitnessFmax-0.75-1.5.npy")
             self.assertEqual(values.shape, (32,))
@@ -269,10 +276,17 @@ class TransformerSmokeTests(unittest.TestCase):
 
             with patch.object(ea_simple_elitism.TransformerTree, "load_model", load_temporary_model), temporary_training_root(
                 "TRANSGP_TRAIN_ROOT", root / "results" / "train"
+            ), patch("main.TRANSGP_ROOT", root), patch(
+                "main.checkpoint_paths", return_value=()
             ), patch.dict(creator.__dict__), patch.object(GPFC, "POP_SIZE", 30), patch.object(GPFC, "NGEN", 1), patch.object(
                 GPFC, "CXPB", 0.0
             ), patch.object(GPFC, "MUTPB", 1.0), patch.object(GPFC, "REPPB", 0.0):
-                GPFC.main(SCENARIO, 123, "max-flowtime", [0.75, 0.85, 0.95])
+                config_path = root / "transgp.json"
+                config_path.write_text(json.dumps({
+                    "algorithm": "TransGP", "dataset_name": SCENARIO,
+                    "objective": "Fmax", "seed": 123,
+                }), encoding="utf-8")
+                experiment_main.main(["--config", str(config_path)])
             for utilization in (0.75, 0.85, 0.95):
                 task = f"Fmax-{utilization}-1.5"
                 task_root = root / "results" / "train" / f"scenario_{task}"
@@ -284,9 +298,9 @@ class TransformerSmokeTests(unittest.TestCase):
             import TransGP.GP_TransGP_test as evaluator
 
             with patch.dict(evaluator.METHOD_ROOTS, {"TransGP": root / "results"}), patch(
-                "TransGP.main_GP_TransGP_test.os.chdir"
+                "main.TRANSGP_ROOT", root
             ):
-                main_GP_TransGP_test.main(["TransGP", SCENARIO, "Fmax", "123"])
+                experiment_main.main(["--config", str(config_path), "--algorithm", "TransGP-test"])
                 fitness_path, runtime_path = evaluator.output_paths("TransGP", SCENARIO, 123)
                 values = np.load(fitness_path)
                 self.assertEqual(values.shape, (3,))
@@ -311,11 +325,16 @@ class TransformerSmokeTests(unittest.TestCase):
                     with (task_root / f"{seed}_meng_archive_{task}.pkl").open("wb") as handle:
                         pickle.dump({0: [["PT"], ["WIQ"]]}, handle)
 
-            with patch("TransGP.main_model_train.PROJECT_ROOT", root), patch(
+            with patch("main_model_train.TRANSGP_ROOT", root), patch(
                 "TransGP.Transformer.Transformer_tree_multitask.DrawTree.draw_tree"
             ):
                 for rule_type in ("sequencing", "routing"):
-                    main_model_train.main([SCENARIO, rule_type, "Transformer", "1"])
+                    config_path = root / f"{rule_type}.json"
+                    config_path.write_text(json.dumps({
+                        "algorithm": "TransGP", "dataset_name": SCENARIO,
+                        "rule_type": rule_type, "model_type": "Transformer", "epochs": 1,
+                    }), encoding="utf-8")
+                    model_entry.main(["--config", str(config_path)])
                     model = TransformerTree(777, SCENARIO, rule_type, max_len=128)
                     model.load_model()
                     checkpoint = (

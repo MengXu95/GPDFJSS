@@ -1,0 +1,7 @@
+{
+  "algorithm": "TransGP",
+  "dataset_name": "Fmax-0.75-0.85-0.95-1.5",
+  "rule_type": "sequencing",
+  "model_type": "Transformer",
+  "epochs": 50
+}

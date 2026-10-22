@@ -1,6 +1,7 @@
 import ast
 import contextlib
 import io
+import json
 from pathlib import Path
 import re
 import subprocess
@@ -28,7 +29,10 @@ class IntegrationScopeTests(unittest.TestCase):
         self.assertFalse((ROOT / "MultitaskTransformerGuidedMutationGP" / "ParallelToolbox.py").exists())
 
     def test_python_sources_have_complete_import_boundaries(self):
-        shared = {"newSimulatorBasedOnJava", "MTGPforNewSimulatorBasedOnJava", "Utils"}
+        shared = {
+            "newSimulatorBasedOnJava", "MTGPforNewSimulatorBasedOnJava", "Utils",
+            "main", "main_model_train", "experiment_config",
+        }
         external = sys.stdlib_module_names | {"numpy", "deap", "torch", "pandas", "graphviz"}
         for path in ROOT.rglob("*.py"):
             tree = ast.parse(path.read_text(encoding="utf-8-sig"))
@@ -54,7 +58,10 @@ class IntegrationScopeTests(unittest.TestCase):
         self.assertTrue(all(path.is_relative_to(ROOT / "Transformer") for path in paths))
 
     def test_module_entry_points_work_from_repository_root(self):
-        for module in ("TransGP.main", "TransGP.main_model_train", "TransGP.main_GP_TransGP_test"):
+        for module in (
+            "main", "main_model_train", "TransGP.main",
+            "TransGP.main_model_train", "TransGP.main_GP_TransGP_test",
+        ):
             with self.subTest(module=module):
                 result = subprocess.run(
                     [sys.executable, "-m", module, "--help"],
@@ -100,13 +107,20 @@ class SharedGPRegressionTests(unittest.TestCase):
         import numpy as np
         from deap import creator
         from MTGPforNewSimulatorBasedOnJava import GPFC
+        import main
 
         with tempfile.TemporaryDirectory() as directory, contextlib.chdir(directory), patch.dict(
             creator.__dict__
         ), patch.object(GPFC, "POP_SIZE", 12), patch.object(GPFC, "NGEN", 1), patch.object(
             GPFC, "ELITISM", 4
         ), contextlib.redirect_stdout(io.StringIO()):
-            GPFC.main("Fmax-0.85-1.5", 123, "max-flowtime", 0.85)
+            config_path = Path(directory) / "gp.json"
+            config_path.write_text(json.dumps({
+                "algorithm": "MTGP", "dataset_name": "Fmax-0.85-1.5",
+                "objective": "Fmax", "seed": 123,
+            }), encoding="utf-8")
+            with patch("main.PROJECT_ROOT", Path(directory)):
+                main.main(["--config", str(config_path)])
             root = Path(directory) / "MTGPforNewSimulatorBasedOnJava" / "train" / "scenario_Fmax-0.85-1.5"
             values = np.load(root / "123_min_fitnessFmax-0.85-1.5.npy")
             self.assertEqual(values.shape, (2,))

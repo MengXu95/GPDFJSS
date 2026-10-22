@@ -1,0 +1,6 @@
+{
+  "algorithm": "TransGP-archive-test",
+  "dataset_name": "Fmax-0.75-1.5",
+  "objective": "Fmax",
+  "seed": 0
+}

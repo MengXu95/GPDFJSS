@@ -1,0 +1,6 @@
+{
+  "algorithm": "MTGP-test",
+  "dataset_name": "Fmax-0.85-1.5",
+  "objective": "Fmax",
+  "seed": 0
+}
