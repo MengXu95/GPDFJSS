@@ -41,10 +41,9 @@ evolution, the models generate mutation subtrees conditioned on
 | Simulator | [newSimulatorBasedOnJava](../../newSimulatorBasedOnJava) | Shared Python DFJSS simulator; no Java runtime is required |
 | Evaluation | [GP_TransGP_test.py](../GP_TransGP_test.py) | Saved-rule loading, independent simulation and test results |
 
-The paper reference is in the [project README](../../README.md#transgp-citation)
-and [CITATION.cff](../CITATION.cff).
+The paper reference is in the [project README](../../README.md#transgp-citation).
 Configuration fields and all runnable examples are listed in the
-[unified configuration reference](../../README.md#unified-configuration).
+[configuration reference](../../docs/CONFIGURATION.md).
 `MTGP` now unambiguously selects the original basic GP at the root entry point;
 use `TransGP-archive` to generate the pretraining data described here.
 
